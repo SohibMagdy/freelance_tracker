@@ -71,30 +71,6 @@ Stop refreshing freelance websites manually. Let Freelance Tracker PRO watch the
 
 ---
 
-## Screenshots
-
-> Add your screenshots below.
-
-<!--
-<p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="800" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/notification.png" alt="Notification" width="400" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings.png" alt="Settings" width="800" />
-</p>
--->
-
-| Dashboard | Settings | Notification |
-|-----------|----------|-------------|
-| *Screenshot here* | *Screenshot here* | *Screenshot here* |
-
----
-
 ## Architecture
 
 ```

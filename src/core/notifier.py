@@ -25,6 +25,7 @@ from src.utils.resources import (
     APP_ICON, MOSTAQL_ICON, NAFEZLY_ICON,
     KAFIIL_ICON, KHAMSAT_ICON, FREELANCEYARD_ICON
 )
+from src.utils.crash_logger import get_logger, get_subprocess_tracker
 
 
 # ==========================================
@@ -56,6 +57,8 @@ class Notifier:
 
     def __init__(self, notifications_enabled: bool = True):
         self.notifications_enabled = notifications_enabled
+        self._logger = get_logger()
+        self._subprocess_tracker = get_subprocess_tracker()
 
     def notify(self, project: dict) -> None:
         """
@@ -140,12 +143,16 @@ except Exception as e:
 '''
 
         try:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 [sys.executable, "-c", script],
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            self._subprocess_tracker.register(proc)
             print("[Notifier] [OK] Notification subprocess launched.")
+            self._logger.debug("Notification subprocess launched PID: %s for %s", proc.pid, title)
         except Exception as e:
-            print(f"[Notifier] [ERROR] Could not launch notification subprocess: {e}")
+            msg = f"Could not launch notification subprocess: {e}"
+            print(f"[Notifier] [ERROR] {msg}")
+            self._logger.error(msg, exc_info=True)

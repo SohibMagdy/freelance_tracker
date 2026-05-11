@@ -10,6 +10,7 @@ import re
 from typing import List, Dict
 
 from .base import BaseScraper
+from src.utils.crash_logger import get_logger
 
 # Flag to track Playwright availability
 _PLAYWRIGHT_AVAILABLE = True
@@ -242,13 +243,16 @@ class TruelancerScraper(BaseScraper):
 
         except PWTimeoutError:
             print("[TruelancerScraper] Page load timed out (30s). Retrying next cycle.")
+            get_logger().warning("Truelancer Playwright timeout (30s).")
             return []
 
         except Exception as e:
             print(f"[TruelancerScraper] Playwright error: {e}")
+            get_logger().error("Truelancer Playwright error: %s", e, exc_info=True)
             # If browser crashed, reset for next attempt
             if "Target closed" in str(e) or "Browser" in str(e):
                 print("[TruelancerScraper] Browser crashed. Will relaunch next cycle.")
+                get_logger().warning("Truelancer browser crashed. Forcing cleanup.")
                 self._cleanup()
             return []
 

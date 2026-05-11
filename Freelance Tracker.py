@@ -93,7 +93,16 @@ def main():
     """Application entry point."""
 
     # ------------------------------------------
-    # 0. Single-instance guard
+    # 0. Global Exception Hooks
+    # ------------------------------------------
+    try:
+        from src.utils.crash_logger import install_crash_hooks, install_qt_message_handler
+        install_crash_hooks()
+    except Exception as e:
+        print(f"[FATAL] Could not install crash hooks: {e}")
+
+    # ------------------------------------------
+    # 0.1 Single-instance guard
     # ------------------------------------------
     mutex_handle = _acquire_single_instance_mutex()
 
@@ -125,6 +134,12 @@ def main():
         print("\n[FATAL] PySide6 is not installed.")
         print("  Run:  pip install PySide6")
         sys.exit(1)
+
+    # Install Qt message handler now that PySide6 is imported
+    try:
+        install_qt_message_handler()
+    except Exception as e:
+        print(f"[Warning] Could not install Qt message handler: {e}")
 
     # ------------------------------------------
     # 2. Create QApplication

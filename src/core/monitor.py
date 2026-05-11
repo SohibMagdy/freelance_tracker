@@ -16,6 +16,13 @@ from src.core.scrapers.mostaql import MostaqlScraper
 from src.core.scrapers.nafezly import NafezlyScraper
 from src.core.scrapers.truelancer import TruelancerScraper
 from src.core.notifier import Notifier
+from src.utils.crash_logger import (
+    get_logger,
+    get_watchdog,
+    get_rate_limiter,
+    get_subprocess_tracker,
+    safe_qthread_run
+)
 
 
 # ==========================================
@@ -58,6 +65,10 @@ class MonitorThread(QThread):
         self._notifier = Notifier()
         self._is_initial_load = True
         self._keyword_filter: list = []
+        self._logger = get_logger()
+        self._watchdog = get_watchdog()
+        self._rate_limiter = get_rate_limiter()
+        self._subprocess_tracker = get_subprocess_tracker()
 
     # ==========================================
     # CONFIGURATION
@@ -98,10 +109,12 @@ class MonitorThread(QThread):
     # THREAD EXECUTION
     # ==========================================
 
+    @safe_qthread_run
     def run(self) -> None:
         """Main thread loop — scrape, compare, emit, sleep, repeat."""
         self.status_changed.emit("ONLINE")
         self._is_initial_load = True
+        self._logger.info("MonitorThread started.")
 
         # Initial load — populate seen_projects without notifications
         self._scrape_cycle(notify=False)
@@ -120,8 +133,24 @@ class MonitorThread(QThread):
             while elapsed < interval and not self.isInterruptionRequested():
                 self.msleep(500)
                 elapsed += 0.5
+                
+                # Watchdog heartbeat
+                self._watchdog.heartbeat("MonitorThread")
+                
+                # Drain queued notifications
+                queued_project = self._rate_limiter.drain_one()
+                if queued_project:
+                    self._notifier.notify(queued_project)
+                
+                # Clean up finished subprocesses
+                self._subprocess_tracker.cleanup()
+                
+                # Periodic watchdog log (every ~300s, WatchdogLogger handles internal timing, but actually WatchdogLogger.log_status() logs it unconditionally. Let's not call log_status here, just heartbeat)
 
         self.status_changed.emit("OFFLINE")
+        self._logger.info("MonitorThread stopped.")
+        # Kill any remaining subprocesses when monitor stops
+        self._subprocess_tracker.kill_all()
 
     def _scrape_cycle(self, notify: bool = True) -> None:
         """Run one scraping cycle across all enabled platforms."""
@@ -160,11 +189,13 @@ class MonitorThread(QThread):
                         if notify and not self._is_initial_load:
                             # Emit signal for GUI
                             self.new_project.emit(project)
-                            # Send Windows notification
-                            self._notifier.notify(project)
+                            # Queue for Windows notification (rate limited)
+                            if self._rate_limiter.try_send(project):
+                                self._notifier.notify(project)
 
             except Exception as e:
                 error_msg = f"[{platform_key}] Scrape error: {e}"
+                self._logger.error(error_msg, exc_info=True)
                 print(error_msg)
                 self.error_occurred.emit(error_msg)
 

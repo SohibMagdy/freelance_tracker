@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icons/banner.jpeg" alt="Freelance Tracker PRO" width="100" />
+  <img src="icons/banner.jpeg" alt="Freelance Tracker PRO" width="1000" />
 </p>
 
 <h1 align="center">Freelance Tracker PRO</h1>

@@ -52,11 +52,12 @@ class SettingsManager:
                     with open(self._filepath, "r", encoding="utf-8") as f:
                         self._data = json.load(f)
                 except (json.JSONDecodeError, IOError):
+                    print("[SettingsManager] Corrupt settings file — resetting to defaults.")
                     self._data = {}
             else:
                 self._data = {}
 
-            # Merge defaults for any missing keys
+            # Merge defaults for any missing keys (handles upgrades too)
             for key, default_value in DEFAULTS.items():
                 if key not in self._data:
                     self._data[key] = default_value
@@ -64,6 +65,26 @@ class SettingsManager:
                     for sub_key, sub_default in default_value.items():
                         if sub_key not in self._data[key]:
                             self._data[key][sub_key] = sub_default
+
+        # Persist the (possibly newly created / upgraded) settings to disk
+        # so the file always exists after the first launch.
+        self._ensure_file_exists()
+
+    def _ensure_file_exists(self) -> None:
+        """Write settings to disk only if the file does not yet exist.
+        This guarantees a valid settings.json on every first launch without
+        overwriting existing user preferences."""
+        if not os.path.exists(self._filepath):
+            try:
+                os.makedirs(os.path.dirname(self._filepath), exist_ok=True)
+            except (OSError, ValueError):
+                pass  # dirname may be '' if filepath has no directory component
+            try:
+                with open(self._filepath, "w", encoding="utf-8") as f:
+                    json.dump(self._data, f, indent=2, ensure_ascii=False)
+                print(f"[SettingsManager] Created default settings at: {self._filepath}")
+            except IOError as e:
+                print(f"[SettingsManager] Could not create settings file: {e}")
 
     def save(self) -> None:
         """Persist current settings to disk."""

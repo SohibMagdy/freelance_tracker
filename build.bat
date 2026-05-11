@@ -44,7 +44,6 @@ python -m PyInstaller ^
     --name "Freelance Tracker" ^
     --icon "icons\FWT.ico" ^
     --add-data "icons;icons" ^
-    --add-data "settings.json;." ^
     --hidden-import "PySide6.QtWidgets" ^
     --hidden-import "PySide6.QtCore" ^
     --hidden-import "PySide6.QtGui" ^

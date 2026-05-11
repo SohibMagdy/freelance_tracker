@@ -1,0 +1,78 @@
+# ===================================================
+# Freelance Tracker PRO — .gitignore
+# ===================================================
+
+# ----- Python -----
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# ----- Virtual Environment -----
+venv/
+.venv/
+env/
+ENV/
+
+# ----- PyInstaller -----
+build/
+dist/
+*.spec
+
+# ----- IDE / Editor -----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ----- OS Files -----
+Thumbs.db
+Desktop.ini
+.DS_Store
+ehthumbs.db
+
+# ----- Runtime / User Config -----
+settings.json
+
+# ----- Logs -----
+*.log
+logs/
+
+# ----- Temp / Cache -----
+*.tmp
+*.bak
+*.cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.tox/
+
+# ----- Distribution -----
+*.egg-info/
+*.egg
+*.whl
+*.tar.gz
+
+# ----- Playwright -----
+# Browser binaries are installed per-machine
+# and should not be committed
+playwright-browsers/
+
+# ===================================================
+# KEEP (do NOT ignore)
+# ===================================================
+# icons/           — Application and platform icons
+# src/             — All source code
+# README.md        — Project documentation
+# requirements.txt — Python dependencies
+# build.bat        — Windows batch build script
+# build.ps1        — PowerShell build script
+# Freelance Tracker.py — Application entry point
+# ===================================================

@@ -6,27 +6,21 @@ Architecture:
     CALLABLE on_click handler. The subprocess stays alive waiting for the click,
     then calls webbrowser.open(url) and exits cleanly.
 
-Why toast() + callable (not notify() + string):
-    - notify() is fire-and-forget: exits immediately, click has no handler.
-    - Passing a URL string as on_click sets the toast launch attribute, but
-      protocol activation only works for registered UWP/COM apps -- plain Python
-      executables are NOT registered, so Windows silently ignores the click.
-    - toast() + callable keeps the subprocess alive via asyncio until the user
-      clicks or dismisses. The callable calls webbrowser.open() reliably.
-    - Verified working: click detected, browser opens, subprocess exits cleanly.
-    - No COM registration needed. Works in dev mode and PyInstaller EXE builds.
+    To prevent subprocess accumulation, we use a background thread with a bounded
+    queue and a concurrency limiter (Semaphore) to ensure no more than 3
+    toast processes run simultaneously.
 """
 
 import subprocess
 import sys
 import os
+import threading
+import queue
 
 from src.utils.resources import (
     APP_ICON, MOSTAQL_ICON, NAFEZLY_ICON,
     KAFIIL_ICON, KHAMSAT_ICON, FREELANCEYARD_ICON
 )
-from src.utils.crash_logger import get_logger, get_subprocess_tracker
-
 
 # ==========================================
 # ICON MAPPING
@@ -45,25 +39,20 @@ PLATFORM_ICONS = {
 class Notifier:
     """
     Handles Windows toast notifications for new freelance projects.
-
-    Design:
-        - Each notification spawns a dedicated subprocess.
-        - Subprocess calls toast() with a callable on_click -> webbrowser.open(url).
-        - Subprocess stays alive (via asyncio) until user clicks or dismisses.
-        - On click: browser opens the project URL, subprocess exits cleanly.
-        - On dismiss/timeout: subprocess exits cleanly with no action.
-        - GUI thread never blocks. No zombie processes.
+    Uses a Queue to manage dispatching subprocesses.
     """
 
     def __init__(self, notifications_enabled: bool = True):
         self.notifications_enabled = notifications_enabled
-        self._logger = get_logger()
-        self._subprocess_tracker = get_subprocess_tracker()
+        self._queue = queue.Queue(maxsize=100)
+        self._semaphore = threading.Semaphore(3)  # Max 3 active notifications at once
+        
+        self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker_thread.start()
 
     def notify(self, project: dict) -> None:
         """
-        Send a Windows toast notification for a new project.
-        Spawns a subprocess -- GUI thread never blocks.
+        Queue a Windows toast notification for a new project.
         """
         if not self.notifications_enabled:
             return
@@ -76,19 +65,42 @@ class Notifier:
         if icon_path and not os.path.exists(icon_path):
             icon_path = None
 
-        self._send(site=site, title=title, link=link, icon_path=icon_path)
-        print(f"[Notifier] [OK] Notification queued | {site} - {title[:60]}")
-        print(f"[Notifier]      URL: {link}")
+        try:
+            self._queue.put_nowait((site, title, link, icon_path))
+            print(f"[Notifier] [OK] Notification queued | {site} - {title[:60]}")
+        except queue.Full:
+            print(f"[Notifier] [WARN] Notification queue is full. Dropping: {title[:30]}")
 
-    def _send(self, site: str, title: str, link: str, icon_path: str = None) -> None:
+    def _worker_loop(self):
+        """Background thread that consumes the queue and launches subprocesses."""
+        while True:
+            try:
+                site, title, link, icon_path = self._queue.get()
+                
+                # Wait for a slot to open up (prevents 100 subprocesses from spawning at once)
+                self._semaphore.acquire()
+                
+                # Launch the notification in a way that will release the semaphore when done
+                threading.Thread(
+                    target=self._launch_subprocess_and_wait,
+                    args=(site, title, link, icon_path),
+                    daemon=True
+                ).start()
+                
+            except Exception as e:
+                print(f"[Notifier] Worker loop error: {e}")
+
+    def _launch_subprocess_and_wait(self, site: str, title: str, link: str, icon_path: str):
+        """Launch the subprocess and wait for it to exit, then release semaphore."""
+        try:
+            self._send_blocking(site, title, link, icon_path)
+        finally:
+            self._semaphore.release()
+
+    def _send_blocking(self, site: str, title: str, link: str, icon_path: str = None) -> None:
         """
         Spawn a subprocess that posts the toast and waits for user interaction.
-
-        The subprocess uses toast() with a callable on_click.
-        toast() blocks via asyncio.run() until click or dismiss, then exits.
-        On click: webbrowser.open(url) fires and the subprocess exits cleanly.
         """
-        # Sanitize for safe embedding in inline Python source
         safe_title = title.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")[:150]
         safe_site  = site.replace("\\", "\\\\").replace('"', '\\"')
         safe_link  = link.replace("\\", "\\\\").replace('"', '\\"')
@@ -102,7 +114,6 @@ class Notifier:
 import sys
 import webbrowser
 
-# Reconfigure stdout for Windows console safety
 try:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -113,19 +124,11 @@ URL = "{safe_link}"
 TITLE = "{safe_site} - New Project"
 BODY  = "{safe_title}"
 
-print(f"[NotifyWorker] [INFO] Notification created")
-print(f"[NotifyWorker] [INFO] URL: {{URL}}")
-print(f"[NotifyWorker] [INFO] Waiting for user interaction...")
-
 def on_click(args):
-    """Called by win11toast when the user clicks the notification body."""
-    print(f"[NotifyWorker] [OK] Notification clicked - opening URL in browser")
-    print(f"[NotifyWorker]      URL: {{URL}}")
     try:
         webbrowser.open(URL)
-        print(f"[NotifyWorker] [OK] Browser launched successfully")
-    except Exception as e:
-        print(f"[NotifyWorker] [ERROR] Failed to open browser: {{e}}")
+    except Exception:
+        pass
     return args
 
 try:
@@ -137,22 +140,22 @@ try:
         duration="short",
         audio={{"silent": "false"}}{icon_arg}
     )
-    print(f"[NotifyWorker] [INFO] Toast session ended. Result: {{result}}")
-except Exception as e:
-    print(f"[NotifyWorker] [ERROR] Toast failed: {{e}}")
+except Exception:
+    pass
 '''
 
         try:
+            # We use Popen and wait() to block the thread until the subprocess finishes (toast dismissed/clicked)
             proc = subprocess.Popen(
                 [sys.executable, "-c", script],
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            self._subprocess_tracker.register(proc)
-            print("[Notifier] [OK] Notification subprocess launched.")
-            self._logger.debug("Notification subprocess launched PID: %s for %s", proc.pid, title)
+            # Wait up to 30 seconds for the toast to naturally disappear or be clicked
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
         except Exception as e:
-            msg = f"Could not launch notification subprocess: {e}"
-            print(f"[Notifier] [ERROR] {msg}")
-            self._logger.error(msg, exc_info=True)
+            print(f"[Notifier] [ERROR] Subprocess failed: {e}")

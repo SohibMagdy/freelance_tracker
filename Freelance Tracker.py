@@ -1,38 +1,27 @@
 """
-Freelance Tracker — Premium PySide6 Desktop Application
+Freelance Tracker PRO — Premium CustomTkinter Desktop Application
 ========================================================
-Main entry point. Initializes the Qt application, loads the theme,
-creates the main window, and starts the GUI event loop.
-
-Usage:
-    python "Freelance Tracker.py"
-
-Single-instance protection:
-    A named Windows mutex is acquired at startup.
-    If another instance is already running (e.g. triggered by a Windows
-    notification click re-launching the EXE), the new process detects the
-    mutex, logs a message, and exits immediately without showing any UI.
-    This is the final safety net on top of the protocol-activation approach
-    used in notifier.py.
+Main entry point. Initializes CustomTkinter, loads settings,
+sets up crash logging, system tray, and starts the GUI event loop.
 """
 
 import sys
 import os
+import ctypes
+import traceback
+import threading
+from datetime import datetime
+import customtkinter as ctk
 
 # ==========================================
 # UTF-8 CONSOLE SAFETY (Windows EXE builds)
 # ==========================================
-# Windows console may use cp1252/cp437 which cannot encode Unicode symbols.
-# Reconfigure stdout/stderr to UTF-8 with error replacement to prevent
-# UnicodeEncodeError crashes in packaged EXE builds.
 try:
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 except Exception:
-    # Fallback: if reconfigure fails (e.g., stdout is None in --windowed mode),
-    # redirect to devnull to prevent any write crashes.
     import io
     if sys.stdout is None:
         sys.stdout = io.StringIO()
@@ -42,172 +31,147 @@ except Exception:
 # ==========================================
 # ENSURE PROJECT ROOT IS ON PYTHON PATH
 # ==========================================
-
-# This guarantees that `from src.xxx import ...` works
-# regardless of where the script is executed from.
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+# ==========================================
+# GLOBAL CRASH LOGGING
+# ==========================================
+LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
+ERROR_LOG_FILE = os.path.join(LOGS_DIR, "error.log")
+
+def setup_crash_logging():
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+            
+        with open(ERROR_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"\\n--- CRASH: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\\n")
+            traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+            
+        print(f"[FATAL ERROR] An unexpected error occurred. Details written to {ERROR_LOG_FILE}", file=sys.stderr)
+        
+    def handle_thread_exception(args):
+        with open(ERROR_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"\\n--- THREAD CRASH: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\\n")
+            traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback, file=f)
+            
+        print(f"[FATAL ERROR] Thread crash. Details written to {ERROR_LOG_FILE}", file=sys.stderr)
+
+    sys.excepthook = handle_exception
+    threading.excepthook = handle_thread_exception
 
 # ==========================================
 # SINGLE-INSTANCE GUARD (Windows Mutex)
 # ==========================================
-
 def _acquire_single_instance_mutex():
-    """
-    Attempt to create a named Windows mutex.
-
-    Returns:
-        mutex handle on success (first instance),
-        None if the mutex already exists (duplicate instance).
-
-    This prevents Windows notification activation from launching
-    a second copy of the application.
-    """
     try:
-        import ctypes
         import ctypes.wintypes
-
-        MUTEX_NAME = "FreelanceTrackerPRO_SingleInstance_Mutex_v1"
-
-        # CreateMutexW returns a handle; if another process already owns
-        # the mutex, GetLastError() returns ERROR_ALREADY_EXISTS (183).
+        MUTEX_NAME = "FreelanceTrackerPRO_SingleInstance_Mutex_v2"
         handle = ctypes.windll.kernel32.CreateMutexW(None, True, MUTEX_NAME)
         last_error = ctypes.windll.kernel32.GetLastError()
-
         ERROR_ALREADY_EXISTS = 183
         if last_error == ERROR_ALREADY_EXISTS:
             if handle:
                 ctypes.windll.kernel32.CloseHandle(handle)
-            return None  # Another instance is running
-
-        return handle  # We are the first instance; hold the mutex
+            return None
+        return handle
     except Exception as e:
-        # If mutex check fails for any reason, allow startup (fail-open)
         print(f"[SingleInstance] Mutex check failed (non-fatal): {e}")
         return "UNKNOWN"
+
+# ==========================================
+# SYSTEM TRAY (PyStray)
+# ==========================================
+def run_system_tray(app_window):
+    """Run pystray system tray icon in a separate thread."""
+    try:
+        import pystray
+        from PIL import Image
+        from src.utils.resources import APP_ICON
+        
+        # Load icon
+        if os.path.exists(APP_ICON):
+            image = Image.open(APP_ICON)
+        else:
+            # Fallback 16x16 black image
+            image = Image.new('RGB', (16, 16), color=(0, 0, 0))
+
+        def show_window(icon, item):
+            app_window.after(0, app_window.deiconify)
+
+        def quit_app(icon, item):
+            icon.stop()
+            app_window.after(0, app_window.quit_app)
+
+        menu = pystray.Menu(
+            pystray.MenuItem('Show Window', show_window, default=True),
+            pystray.MenuItem('Quit', quit_app)
+        )
+
+        icon = pystray.Icon("Freelance Tracker PRO", image, "Freelance Tracker PRO", menu)
+        icon.run()
+    except ImportError:
+        print("[SystemTray] pystray or Pillow not installed. Tray disabled.")
+    except Exception as e:
+        print(f"[SystemTray] Failed to start system tray: {e}")
 
 
 def main():
     """Application entry point."""
+    setup_crash_logging()
 
-    # ------------------------------------------
-    # 0. Global Exception Hooks
-    # ------------------------------------------
-    try:
-        from src.utils.crash_logger import install_crash_hooks, install_qt_message_handler
-        install_crash_hooks()
-    except Exception as e:
-        print(f"[FATAL] Could not install crash hooks: {e}")
-
-    # ------------------------------------------
-    # 0.1 Single-instance guard
-    # ------------------------------------------
     mutex_handle = _acquire_single_instance_mutex()
-
     if mutex_handle is None:
-        # Another instance is already running.
-        # This can happen if Windows re-activates the EXE when the user
-        # clicks a toast notification. Exit silently.
-        print("[SingleInstance] [BLOCKED] Duplicate launch detected - another instance "
-              "is already running. Exiting immediately.")
-        print("[SingleInstance]   (This is expected if triggered by a "
-              "notification click. The notification's URL should have opened "
-              "in your browser instead.)")
+        print("[SingleInstance] [BLOCKED] Duplicate launch detected. Exiting immediately.")
         sys.exit(0)
 
-    print("[SingleInstance] [OK] Mutex acquired - this is the primary instance.")
-
     print("=" * 55)
-    print("  FREELANCE TRACKER PRO - Starting...")
+    print("  FREELANCE TRACKER PRO (CustomTkinter) - Starting...")
     print("=" * 55)
 
-    # ------------------------------------------
-    # 1. Import PySide6 (fail-fast with clear message)
-    # ------------------------------------------
-    try:
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtGui import QIcon, QFont
-        from PySide6.QtCore import Qt
-    except ImportError:
-        print("\n[FATAL] PySide6 is not installed.")
-        print("  Run:  pip install PySide6")
-        sys.exit(1)
+    # Setup CustomTkinter Global Appearance
+    ctk.set_appearance_mode("Dark")
+    ctk.set_default_color_theme("blue")
 
-    # Install Qt message handler now that PySide6 is imported
-    try:
-        install_qt_message_handler()
-    except Exception as e:
-        print(f"[Warning] Could not install Qt message handler: {e}")
-
-    # ------------------------------------------
-    # 2. Create QApplication
-    # ------------------------------------------
-    # Enable High-DPI scaling for sharp rendering on modern displays
-    QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-    )
-
-    app = QApplication(sys.argv)
-    app.setApplicationName("Freelance Tracker PRO")
-    app.setOrganizationName("FreelanceTracker")
-
-    # Set app icon
-    from src.utils.resources import APP_ICON
-    if os.path.exists(APP_ICON):
-        app.setWindowIcon(QIcon(APP_ICON))
-
-    # ------------------------------------------
-    # 3. Load global theme / stylesheet
-    # ------------------------------------------
-    from src.ui.styles.theme import get_stylesheet
-    app.setStyleSheet(get_stylesheet())
-    print("[App] Theme loaded.")
-
-    # ------------------------------------------
-    # 4. Load settings
-    # ------------------------------------------
+    # Load settings
     from src.utils.settings_manager import SettingsManager
     from src.utils.resources import SETTINGS_FILE
-
     settings = SettingsManager(SETTINGS_FILE)
     print(f"[App] Settings loaded - interval={settings.check_interval}s, "
           f"notifications={'ON' if settings.notifications_enabled else 'OFF'}")
 
-    # ------------------------------------------
-    # 5. Create and show the main window
-    # ------------------------------------------
+    # Create main window
     from src.ui.main_window import MainWindow
-
     window = MainWindow(settings)
-    window.show()
-    print("[App] Main window displayed. Ready to monitor!")
-    print("=" * 55)
+    
+    # Start System Tray in background
+    tray_thread = threading.Thread(target=run_system_tray, args=(window,), daemon=True)
+    tray_thread.start()
 
-    # ------------------------------------------
-    # 6. Start the Qt event loop
-    # ------------------------------------------
-    exit_code = app.exec()
+    # Determine startup visibility
+    if settings.get("start_minimized", False):
+        window.withdraw()
+        print("[App] Started minimized to tray.")
+    else:
+        window.deiconify()
+        print("[App] Main window displayed.")
 
-    # Release mutex on clean exit (Windows releases it automatically on
-    # process termination, but being explicit is good practice)
+    # Start mainloop (blocks until app exits)
+    window.mainloop()
+
+    # Cleanup
     try:
-        import ctypes
         if mutex_handle and mutex_handle != "UNKNOWN":
             ctypes.windll.kernel32.ReleaseMutex(mutex_handle)
             ctypes.windll.kernel32.CloseHandle(mutex_handle)
-            print("[SingleInstance] Mutex released.")
     except Exception:
         pass
-
     print("[App] Application exited.")
-    sys.exit(exit_code)
-
-
-# ==========================================
-# ENTRY POINT
-# ==========================================
 
 if __name__ == "__main__":
     main()

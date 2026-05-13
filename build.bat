@@ -1,7 +1,7 @@
 @echo off
 REM ================================================================
 REM  Freelance Tracker PRO — Windows Build Script
-REM  Builds a standalone .exe using PyInstaller
+REM  Builds a standalone .exe using PyInstaller (CustomTkinter)
 REM ================================================================
 
 echo.
@@ -44,12 +44,12 @@ python -m PyInstaller ^
     --name "Freelance Tracker" ^
     --icon "icons\FWT.ico" ^
     --add-data "icons;icons" ^
-    --hidden-import "PySide6.QtWidgets" ^
-    --hidden-import "PySide6.QtCore" ^
-    --hidden-import "PySide6.QtGui" ^
+    --collect-all "customtkinter" ^
+    --collect-all "pystray" ^
     --hidden-import "win11toast" ^
     --hidden-import "requests" ^
     --hidden-import "bs4" ^
+    --hidden-import "PIL" ^
     --hidden-import "src.core.monitor" ^
     --hidden-import "src.core.notifier" ^
     --hidden-import "src.core.scrapers.base" ^
@@ -57,16 +57,12 @@ python -m PyInstaller ^
     --hidden-import "src.core.scrapers.nafezly" ^
     --hidden-import "src.core.scrapers.truelancer" ^
     --hidden-import "src.ui.main_window" ^
-    --hidden-import "src.ui.title_bar" ^
     --hidden-import "src.ui.sidebar" ^
     --hidden-import "src.ui.pages.dashboard" ^
     --hidden-import "src.ui.pages.settings" ^
-    --hidden-import "src.ui.widgets.animated_toggle" ^
-    --hidden-import "src.ui.widgets.glow_button" ^
     --hidden-import "src.ui.widgets.platform_card" ^
     --hidden-import "src.ui.widgets.project_card" ^
-    --hidden-import "src.ui.widgets.status_indicator" ^
-    --hidden-import "src.ui.styles.theme" ^
+    --hidden-import "src.ui.styles.colors" ^
     --hidden-import "src.utils.resources" ^
     --hidden-import "src.utils.settings_manager" ^
     "Freelance Tracker.py"

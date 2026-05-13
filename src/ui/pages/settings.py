@@ -1,5 +1,5 @@
 """
-settings.py — Settings page with configurable options.
+settings.py — Settings page with configurable options for CustomTkinter.
 Includes check interval slider, notification toggles, keyword filter,
 and start-with-Windows toggle.
 """
@@ -7,258 +7,252 @@ and start-with-Windows toggle.
 import winreg
 import sys
 import os
+import customtkinter as ctk
 
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QSlider, QLineEdit, QFrame
-)
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
+from src.ui.styles.colors import Colors
 
-from src.ui.styles.theme import Colors, FONT_FAMILY
-from src.ui.widgets.animated_toggle import AnimatedToggle
-
-
-class SettingRow(QWidget):
+class SettingRow(ctk.CTkFrame):
     """A single setting row with label, description, and control widget."""
 
-    def __init__(self, title: str, description: str, parent=None):
-        super().__init__(parent)
-        self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(0, 8, 0, 8)
-        self._layout.setSpacing(16)
-
+    def __init__(self, master, title: str, description: str, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        
         # Text side
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(2)
+        text_frame = ctk.CTkFrame(self, fg_color="transparent")
+        text_frame.pack(side="left", fill="x", expand=True, pady=8)
 
-        title_label = QLabel(title)
-        title_label.setFont(QFont(
-            FONT_FAMILY.split(",")[0].strip("' "), 13, QFont.DemiBold
-        ))
-        title_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
+        title_label = ctk.CTkLabel(
+            text_frame, 
+            text=title, 
+            font=("Segoe UI", 16, "bold"), 
+            text_color=Colors.TEXT_PRIMARY,
+            anchor="w"
+        )
+        title_label.pack(fill="x")
 
-        desc_label = QLabel(description)
-        desc_label.setFont(QFont(
-            FONT_FAMILY.split(",")[0].strip("' "), 11
-        ))
-        desc_label.setStyleSheet(f"color: {Colors.TEXT_MUTED};")
-        desc_label.setWordWrap(True)
+        desc_label = ctk.CTkLabel(
+            text_frame, 
+            text=description, 
+            font=("Segoe UI", 12), 
+            text_color=Colors.TEXT_MUTED,
+            anchor="w",
+            wraplength=400,
+            justify="left"
+        )
+        desc_label.pack(fill="x")
 
-        text_layout.addWidget(title_label)
-        text_layout.addWidget(desc_label)
+        # Control side
+        self.control_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.control_frame.pack(side="right", fill="y", padx=(20, 0))
 
-        self._layout.addLayout(text_layout, stretch=1)
-
-    def add_control(self, widget: QWidget):
+    def add_control(self, widget: ctk.CTkBaseClass):
         """Add a control widget to the right side."""
-        self._layout.addWidget(widget, alignment=Qt.AlignRight | Qt.AlignVCenter)
+        widget.pack(in_=self.control_frame, side="right", anchor="e")
 
 
-class Divider(QFrame):
+class Divider(ctk.CTkFrame):
     """Subtle horizontal divider line."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFrameShape(QFrame.HLine)
-        self.setFixedHeight(1)
-        self.setStyleSheet(f"background: {Colors.BORDER_SUBTLE}; border: none;")
+    def __init__(self, master, **kwargs):
+        super().__init__(master, height=1, fg_color=Colors.BORDER_SUBTLE, corner_radius=0, **kwargs)
 
 
-class SettingsPage(QWidget):
+class SettingsPage(ctk.CTkScrollableFrame):
     """
     Application settings page with all configurable options.
     Auto-saves changes to the settings manager.
     """
 
-    settings_changed = Signal()
-
-    def __init__(self, settings, parent=None):
-        super().__init__(parent)
-        self._settings = settings
+    def __init__(self, master, settings, on_settings_changed=None, **kwargs):
+        super().__init__(
+            master, 
+            fg_color=Colors.BG_DARK,
+            **kwargs
+        )
+        self.settings = settings
+        self.on_settings_changed_callback = on_settings_changed
         self._build_ui()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 20, 28, 20)
-        layout.setSpacing(8)
-
         # Header
-        header = QLabel("Settings")
-        header.setFont(QFont(
-            FONT_FAMILY.split(",")[0].strip("' "), 22, QFont.Bold
-        ))
-        header.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
-        layout.addWidget(header)
+        header = ctk.CTkLabel(
+            self, 
+            text="Settings", 
+            font=("Segoe UI", 28, "bold"), 
+            text_color=Colors.TEXT_PRIMARY,
+            anchor="w"
+        )
+        header.pack(fill="x", padx=28, pady=(20, 0))
 
-        subtitle = QLabel("Configure monitoring behavior and preferences")
-        subtitle.setFont(QFont(
-            FONT_FAMILY.split(",")[0].strip("' "), 12
-        ))
-        subtitle.setStyleSheet(f"color: {Colors.TEXT_MUTED}; margin-bottom: 12px;")
-        layout.addWidget(subtitle)
+        subtitle = ctk.CTkLabel(
+            self, 
+            text="Configure monitoring behavior and preferences", 
+            font=("Segoe UI", 14), 
+            text_color=Colors.TEXT_MUTED,
+            anchor="w"
+        )
+        subtitle.pack(fill="x", padx=28, pady=(0, 20))
 
         # ======== MONITORING SECTION ========
-        section_monitor = QLabel("MONITORING")
-        section_monitor.setFont(QFont(
-            FONT_FAMILY.split(",")[0].strip("' "), 10, QFont.Bold
-        ))
-        section_monitor.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; letter-spacing: 2px; margin-top: 12px;"
-        )
-        layout.addWidget(section_monitor)
-        layout.addWidget(Divider())
+        self._add_section_header("MONITORING")
 
-        # Check interval slider
         interval_row = SettingRow(
+            self,
             "Check Interval",
             "How often to check for new projects (seconds)"
         )
-
-        interval_container = QVBoxLayout()
-        interval_container.setSpacing(4)
-
-        self._interval_slider = QSlider(Qt.Horizontal)
-        self._interval_slider.setRange(10, 120)
-        self._interval_slider.setValue(self._settings.check_interval)
-        self._interval_slider.setFixedWidth(200)
-        self._interval_slider.setTickPosition(QSlider.NoTicks)
-
-        self._interval_value = QLabel(f"{self._settings.check_interval}s")
-        self._interval_value.setFont(QFont(
-            FONT_FAMILY.split(",")[0].strip("' "), 12, QFont.Bold
-        ))
-        self._interval_value.setStyleSheet(f"color: {Colors.CYAN};")
-        self._interval_value.setAlignment(Qt.AlignCenter)
-        self._interval_value.setFixedWidth(200)
-
-        self._interval_slider.valueChanged.connect(self._on_interval_changed)
-
-        interval_container.addWidget(self._interval_slider)
-        interval_container.addWidget(self._interval_value)
-
-        interval_widget = QWidget()
-        interval_widget.setLayout(interval_container)
-        interval_row.add_control(interval_widget)
-        layout.addWidget(interval_row)
+        
+        interval_container = ctk.CTkFrame(interval_row.control_frame, fg_color="transparent")
+        
+        self.interval_slider = ctk.CTkSlider(
+            interval_container, 
+            from_=10, 
+            to=120, 
+            number_of_steps=110,
+            width=200,
+            progress_color=Colors.CYAN,
+            button_color=Colors.TEXT_PRIMARY,
+            command=self._on_interval_slider_changed
+        )
+        self.interval_slider.set(self.settings.check_interval)
+        
+        self.interval_value = ctk.CTkLabel(
+            interval_container, 
+            text=f"{self.settings.check_interval}s", 
+            font=("Segoe UI", 14, "bold"), 
+            text_color=Colors.CYAN,
+            width=50
+        )
+        
+        # We handle the release event to save, while sliding updates the label
+        self.interval_slider.bind("<ButtonRelease-1>", self._on_interval_changed)
+        
+        self.interval_slider.pack(side="left", padx=5)
+        self.interval_value.pack(side="left")
+        
+        interval_row.add_control(interval_container)
+        interval_row.pack(fill="x", padx=28)
 
         # ======== NOTIFICATIONS SECTION ========
-        section_notif = QLabel("NOTIFICATIONS")
-        section_notif.setFont(QFont(
-            FONT_FAMILY.split(",")[0].strip("' "), 10, QFont.Bold
-        ))
-        section_notif.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; letter-spacing: 2px; margin-top: 16px;"
-        )
-        layout.addWidget(section_notif)
-        layout.addWidget(Divider())
+        self._add_section_header("NOTIFICATIONS")
 
-        # Desktop notifications toggle
         notif_row = SettingRow(
+            self,
             "Desktop Notifications",
             "Show Windows toast notifications for new projects"
         )
-        self._notif_toggle = AnimatedToggle(
-            checked=self._settings.notifications_enabled
+        self.notif_toggle = ctk.CTkSwitch(
+            notif_row.control_frame,
+            text="",
+            progress_color=Colors.CYAN,
+            command=lambda: self._save("notifications_enabled", self.notif_toggle.get() == 1)
         )
-        self._notif_toggle.toggled.connect(
-            lambda v: self._save("notifications_enabled", v)
-        )
-        notif_row.add_control(self._notif_toggle)
-        layout.addWidget(notif_row)
-
-
+        if self.settings.notifications_enabled:
+            self.notif_toggle.select()
+        notif_row.add_control(self.notif_toggle)
+        notif_row.pack(fill="x", padx=28)
 
         # ======== FILTER SECTION ========
-        section_filter = QLabel("FILTERS")
-        section_filter.setFont(QFont(
-            FONT_FAMILY.split(",")[0].strip("' "), 10, QFont.Bold
-        ))
-        section_filter.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; letter-spacing: 2px; margin-top: 16px;"
-        )
-        layout.addWidget(section_filter)
-        layout.addWidget(Divider())
+        self._add_section_header("FILTERS")
 
-        # Keyword filter
         keyword_row = SettingRow(
+            self,
             "Keyword Filter",
             "Only show projects matching these keywords (comma-separated, leave empty for all)"
         )
-        self._keyword_input = QLineEdit()
-        self._keyword_input.setPlaceholderText("e.g. python, react, design")
-        self._keyword_input.setText(self._settings.keyword_filter)
-        self._keyword_input.setFixedWidth(260)
-        self._keyword_input.editingFinished.connect(self._on_keyword_changed)
-        keyword_row.add_control(self._keyword_input)
-        layout.addWidget(keyword_row)
+        self.keyword_input = ctk.CTkEntry(
+            keyword_row.control_frame,
+            width=260,
+            placeholder_text="e.g. python, react, design",
+            border_color=Colors.BORDER_DEFAULT,
+            fg_color=Colors.BG_INPUT
+        )
+        self.keyword_input.insert(0, self.settings.keyword_filter)
+        # Bind focus out and enter key to save
+        self.keyword_input.bind("<FocusOut>", self._on_keyword_changed)
+        self.keyword_input.bind("<Return>", self._on_keyword_changed)
+        
+        keyword_row.add_control(self.keyword_input)
+        keyword_row.pack(fill="x", padx=28)
 
         # ======== SYSTEM SECTION ========
-        section_sys = QLabel("SYSTEM")
-        section_sys.setFont(QFont(
-            FONT_FAMILY.split(",")[0].strip("' "), 10, QFont.Bold
-        ))
-        section_sys.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; letter-spacing: 2px; margin-top: 16px;"
-        )
-        layout.addWidget(section_sys)
-        layout.addWidget(Divider())
+        self._add_section_header("SYSTEM")
 
-        # Start with Windows
         startup_row = SettingRow(
+            self,
             "Start with Windows",
             "Automatically launch Freelance Tracker when Windows starts"
         )
-        self._startup_toggle = AnimatedToggle(
-            checked=self._settings.get("start_with_windows", False)
+        self.startup_toggle = ctk.CTkSwitch(
+            startup_row.control_frame,
+            text="",
+            progress_color=Colors.CYAN,
+            command=self._on_startup_toggle
         )
-        self._startup_toggle.toggled.connect(self._on_startup_toggle)
-        startup_row.add_control(self._startup_toggle)
-        layout.addWidget(startup_row)
+        if self.settings.get("start_with_windows", False):
+            self.startup_toggle.select()
+        startup_row.add_control(self.startup_toggle)
+        startup_row.pack(fill="x", padx=28)
 
-        # Start minimized
         minimized_row = SettingRow(
+            self,
             "Start Minimized",
             "Launch minimized to system tray"
         )
-        self._minimized_toggle = AnimatedToggle(
-            checked=self._settings.get("start_minimized", False)
+        self.minimized_toggle = ctk.CTkSwitch(
+            minimized_row.control_frame,
+            text="",
+            progress_color=Colors.CYAN,
+            command=lambda: self._save("start_minimized", self.minimized_toggle.get() == 1)
         )
-        self._minimized_toggle.toggled.connect(
-            lambda v: self._save("start_minimized", v)
-        )
-        minimized_row.add_control(self._minimized_toggle)
-        layout.addWidget(minimized_row)
+        if self.settings.get("start_minimized", False):
+            self.minimized_toggle.select()
+        minimized_row.add_control(self.minimized_toggle)
+        minimized_row.pack(fill="x", padx=28, pady=(0, 20))
 
-        layout.addStretch()
+    def _add_section_header(self, text: str):
+        section_lbl = ctk.CTkLabel(
+            self,
+            text=text,
+            font=("Segoe UI", 12, "bold"),
+            text_color=Colors.TEXT_MUTED,
+            anchor="w"
+        )
+        section_lbl.pack(fill="x", padx=28, pady=(15, 5))
+        Divider(self).pack(fill="x", padx=28, pady=(0, 10))
 
     # ==========================================
     # HANDLERS
     # ==========================================
 
-    def _on_interval_changed(self, value: int):
-        self._interval_value.setText(f"{value}s")
-        self._settings.check_interval = value
-        self.settings_changed.emit()
+    def _on_interval_slider_changed(self, value):
+        self.interval_value.configure(text=f"{int(value)}s")
 
-    def _on_keyword_changed(self):
-        self._settings.set("keyword_filter", self._keyword_input.text().strip())
-        self.settings_changed.emit()
+    def _on_interval_changed(self, event):
+        value = int(self.interval_slider.get())
+        self.settings.check_interval = value
+        if self.on_settings_changed_callback:
+            self.on_settings_changed_callback()
 
-    def _on_startup_toggle(self, enabled: bool):
+    def _on_keyword_changed(self, event):
+        self.settings.set("keyword_filter", self.keyword_input.get().strip())
+        if self.on_settings_changed_callback:
+            self.on_settings_changed_callback()
+
+    def _on_startup_toggle(self):
+        enabled = self.startup_toggle.get() == 1
         self._save("start_with_windows", enabled)
         self._set_windows_startup(enabled)
 
     def _save(self, key: str, value):
-        self._settings.set(key, value)
-        self.settings_changed.emit()
+        self.settings.set(key, value)
+        if self.on_settings_changed_callback:
+            self.on_settings_changed_callback()
 
     # ==========================================
     # WINDOWS STARTUP REGISTRY
     # ==========================================
 
     def _set_windows_startup(self, enable: bool):
-        """Add or remove the app from Windows startup via registry."""
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
         app_name = "FreelanceTracker"
 
@@ -270,13 +264,18 @@ class SettingsPage(QWidget):
 
             if enable:
                 exe_path = sys.executable
-                script_path = os.path.abspath(
-                    os.path.join(os.path.dirname(__file__), "..", "..", "..", "Freelance Tracker.py")
-                )
-                winreg.SetValueEx(
-                    key, app_name, 0, winreg.REG_SZ,
-                    f'"{exe_path}" "{script_path}"'
-                )
+                if getattr(sys, 'frozen', False):
+                    script_path = sys.executable
+                else:
+                    script_path = os.path.abspath(
+                        os.path.join(os.path.dirname(__file__), "..", "..", "..", "Freelance Tracker.py")
+                    )
+                
+                # If frozen, just point to the exe, if dev, use python + script
+                if getattr(sys, 'frozen', False):
+                    winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, f'"{script_path}"')
+                else:
+                    winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, f'"{exe_path}" "{script_path}"')
             else:
                 try:
                     winreg.DeleteValue(key, app_name)

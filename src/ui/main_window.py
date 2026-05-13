@@ -1,178 +1,134 @@
 """
-main_window.py — Main application window with frameless design.
-Composes the title bar, sidebar, dashboard, and settings pages,
+main_window.py — Main application window using CustomTkinter.
+Composes the sidebar, dashboard, and settings pages,
 and manages the MonitorThread lifecycle with full state management.
 """
 
 import os
 from datetime import datetime
+import customtkinter as ctk
 
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QStackedWidget, QSystemTrayIcon, QMenu, QApplication,
-    QGraphicsDropShadowEffect
-)
-from PySide6.QtCore import Qt, Slot, QTimer
-from PySide6.QtGui import QIcon, QAction, QColor
-
-from src.ui.title_bar import TitleBar
 from src.ui.sidebar import Sidebar
 from src.ui.pages.dashboard import DashboardPage
 from src.ui.pages.settings import SettingsPage
-from src.ui.styles.theme import Colors
+from src.ui.styles.colors import Colors
 from src.core.monitor import MonitorThread
 from src.utils.settings_manager import SettingsManager
 from src.utils.resources import APP_ICON
 
 
-class MainWindow(QMainWindow):
+class MainWindow(ctk.CTk):
     """
-    Frameless main window that integrates all UI components
+    Main window that integrates all UI components
     and manages the background monitoring thread.
     """
 
-    def __init__(self, settings: SettingsManager, parent=None):
-        super().__init__(parent)
-        self._settings = settings
-        self._monitor: MonitorThread = None
-        self._is_monitoring = False
+    def __init__(self, settings: SettingsManager):
+        super().__init__()
+        self.settings = settings
+        self.monitor: MonitorThread = None
+        self.is_monitoring = False
 
         # ==========================================
         # WINDOW SETUP
         # ==========================================
-
-        self.setWindowTitle("Freelance Tracker PRO")
-        self.setMinimumSize(960, 620)
-        self.resize(1100, 720)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        self.setAttribute(Qt.WA_TranslucentBackground, False)
-
-        # Window icon
+        self.title("Freelance Tracker PRO")
+        self.geometry("1100x720")
+        self.minsize(960, 620)
+        
+        # Use native Windows dark title bar by configuring the window background
+        self.configure(fg_color=Colors.BG_DARK)
+        
+        # Window icon (CustomTkinter uses standard tkinter iconbitmap or iconphoto)
         if os.path.exists(APP_ICON):
-            self.setWindowIcon(QIcon(APP_ICON))
+            try:
+                self.iconbitmap(APP_ICON)
+            except Exception as e:
+                print(f"[App] Could not set icon: {e}")
 
         # ==========================================
         # BUILD UI
         # ==========================================
+        
+        # Root layout using pack
+        self.sidebar = Sidebar(self, on_page_change=self._switch_page)
+        self.sidebar.pack(side="left", fill="y")
+        
+        # Container for pages
+        self.pages_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.pages_container.pack(side="right", fill="both", expand=True)
 
-        central = QWidget()
-        central.setObjectName("CentralWidget")
-        central.setStyleSheet(f"""
-            #CentralWidget {{
-                background-color: {Colors.BG_DARK};
-                border: 1px solid {Colors.BORDER_SUBTLE};
-                border-radius: 10px;
-            }}
-        """)
-        self.setCentralWidget(central)
+        # Pages
+        self.dashboard = DashboardPage(
+            self.pages_container, 
+            self.settings,
+            on_start=self._start_monitoring,
+            on_stop=self._stop_monitoring
+        )
+        self.settings_page = SettingsPage(
+            self.pages_container, 
+            self.settings,
+            on_settings_changed=self._on_settings_changed
+        )
+        
+        # Show Dashboard initially
+        self.dashboard.pack(fill="both", expand=True)
+        self.current_page = self.dashboard
 
-        root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
-
-        # Title bar
-        self._title_bar = TitleBar()
-        self._title_bar.minimize_clicked.connect(self.showMinimized)
-        self._title_bar.maximize_clicked.connect(self._toggle_maximize)
-        self._title_bar.close_clicked.connect(self.close)
-        root_layout.addWidget(self._title_bar)
-
-        # Body: sidebar + stacked pages
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
-
-        self._sidebar = Sidebar()
-        self._sidebar.page_changed.connect(self._switch_page)
-        body.addWidget(self._sidebar)
-
-        # Page stack
-        self._pages = QStackedWidget()
-        self._dashboard = DashboardPage(self._settings)
-        self._settings_page = SettingsPage(self._settings)
-
-        self._pages.addWidget(self._dashboard)      # index 0
-        self._pages.addWidget(self._settings_page)   # index 1
-
-        body.addWidget(self._pages, stretch=1)
-        root_layout.addLayout(body, stretch=1)
-
-        # ==========================================
-        # CONNECT SIGNALS
-        # ==========================================
-
-        # Dashboard signals
-        self._dashboard.start_monitoring.connect(self._start_monitoring)
-        self._dashboard.stop_monitoring.connect(self._stop_monitoring)
-        self._dashboard.platform_toggled.connect(self._on_platform_toggled)
-
-        # Settings signals
-        self._settings_page.settings_changed.connect(self._on_settings_changed)
-
-        # ==========================================
-        # SYSTEM TRAY
-        # ==========================================
-
-        self._tray = None
-        self._setup_tray()
-
+        # Intercept window close
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
+        
         print("[App] Main window initialized successfully.")
-        print(f"[App] Settings loaded from: {self._settings._filepath}")
+        print(f"[App] Settings loaded from: {self.settings._filepath}")
 
     # ==========================================
     # PAGE NAVIGATION
     # ==========================================
 
-    @Slot(int)
     def _switch_page(self, index: int):
-        self._pages.setCurrentIndex(index)
-
-    # ==========================================
-    # WINDOW CONTROLS
-    # ==========================================
-
-    def _toggle_maximize(self):
-        if self.isMaximized():
-            self.showNormal()
-        else:
-            self.showMaximized()
+        self.current_page.pack_forget()
+        
+        if index == Sidebar.PAGE_DASHBOARD:
+            self.dashboard.pack(fill="both", expand=True)
+            self.current_page = self.dashboard
+        elif index == Sidebar.PAGE_SETTINGS:
+            self.settings_page.pack(fill="both", expand=True)
+            self.current_page = self.settings_page
 
     # ==========================================
     # MONITORING ENGINE
     # ==========================================
 
-    @Slot()
     def _start_monitoring(self):
         """Start the background monitoring thread."""
-        if self._is_monitoring:
+        if self.is_monitoring:
             print("[App] Monitor already running - ignoring duplicate start.")
             return
 
-        # Create a fresh thread each time (QThread cannot be restarted)
-        self._monitor = MonitorThread(self)
+        self.monitor = MonitorThread()
 
         # Gather settings
-        enabled_platforms = self._dashboard.get_enabled_platforms()
-        check_interval = self._settings.check_interval
-        notifications_enabled = self._settings.notifications_enabled
-        keyword_filter = self._settings.keyword_list
+        enabled_platforms = self.dashboard.get_enabled_platforms()
+        check_interval = self.settings.check_interval
+        notifications_enabled = self.settings.notifications_enabled
+        keyword_filter = self.settings.keyword_list
 
-        self._monitor.configure(
+        self.monitor.configure(
             enabled_platforms=enabled_platforms,
             check_interval=check_interval,
             notifications_enabled=notifications_enabled,
             keyword_filter=keyword_filter,
         )
 
-        # Connect thread signals to GUI slots
-        self._monitor.new_project.connect(self._on_new_project)
-        self._monitor.status_changed.connect(self._on_status_changed)
-        self._monitor.error_occurred.connect(self._on_error)
-        self._monitor.cycle_complete.connect(self._on_cycle_complete)
-        self._monitor.finished.connect(self._on_monitor_finished)
+        # Connect thread callbacks to GUI methods
+        self.monitor.on_new_project = self._queue_new_project
+        self.monitor.on_status_changed = self._queue_status_changed
+        self.monitor.on_error_occurred = self._queue_error
+        self.monitor.on_cycle_complete = self._queue_cycle_complete
+        self.monitor.on_finished = self._queue_monitor_finished
 
-        self._monitor.start()
-        self._is_monitoring = True
+        self.monitor.start()
+        self.is_monitoring = True
 
         print("=" * 50)
         print(f"[App] Monitoring STARTED at {datetime.now().strftime('%H:%M:%S')}")
@@ -180,165 +136,88 @@ class MainWindow(QMainWindow):
         print(f"[App] Interval: {check_interval}s")
         print("=" * 50)
 
-    @Slot()
     def _stop_monitoring(self):
         """Stop the background monitoring thread gracefully."""
-        if not self._is_monitoring or not self._monitor:
+        if not self.is_monitoring or not self.monitor:
             print("[App] No active monitor to stop.")
             return
 
         print(f"[App] Stopping monitor at {datetime.now().strftime('%H:%M:%S')}...")
-        self._monitor.stop()
-        # Don't block the GUI — the finished signal will handle cleanup
-
-    @Slot()
-    def _on_monitor_finished(self):
-        """Called when the monitor thread finishes execution."""
-        self._is_monitoring = False
-        self._dashboard.set_offline()
-        print("[App] Monitor thread finished and cleaned up.")
+        self.monitor.stop()
+        # Don't block the GUI — the on_finished callback will handle cleanup
 
     # ==========================================
-    # MONITOR SIGNAL HANDLERS
+    # MONITOR CALLBACK HANDLERS (Thread-Safe via .after)
     # ==========================================
 
-    @Slot(dict)
+    def _queue_new_project(self, project: dict):
+        self.after(0, lambda: self._on_new_project(project))
+
     def _on_new_project(self, project: dict):
-        """Handle a new project found by the monitor."""
         site = project.get("site", "?")
         title = project.get("title", "?")
         print(f"[Feed] NEW from {site}: {title}")
-        self._dashboard.add_project(project)
+        self.dashboard.add_project(project)
 
-        # Show tray notification balloon
-        if self._tray and self._tray.isVisible():
-            self._tray.showMessage(
-                f"{site} - New Project",
-                title,
-                QSystemTrayIcon.Information,
-                3000
-            )
+    def _queue_status_changed(self, status: str):
+        self.after(0, lambda: self._on_status_changed(status))
 
-    @Slot(str)
     def _on_status_changed(self, status: str):
-        """Handle monitoring status changes."""
         print(f"[App] Status changed: {status}")
 
-    @Slot(str)
+    def _queue_error(self, error_msg: str):
+        self.after(0, lambda: self._on_error(error_msg))
+
     def _on_error(self, error_msg: str):
-        """Handle scraper errors."""
         print(f"[Error] {error_msg}")
 
-    @Slot(int)
+    def _queue_cycle_complete(self, total_count: int):
+        self.after(0, lambda: self._on_cycle_complete(total_count))
+
     def _on_cycle_complete(self, total_count: int):
-        """Handle completion of a scrape cycle."""
-        self._dashboard.update_total_count(total_count)
+        self.dashboard.update_total_count(total_count)
+
+    def _queue_monitor_finished(self):
+        self.after(0, self._on_monitor_finished)
+
+    def _on_monitor_finished(self):
+        self.is_monitoring = False
+        self.dashboard.set_offline()
+        print("[App] Monitor thread finished and cleaned up.")
 
     # ==========================================
     # PLATFORM / SETTINGS UPDATES
     # ==========================================
 
-    @Slot(str, bool)
-    def _on_platform_toggled(self, key: str, enabled: bool):
-        """Update monitor when a platform is toggled."""
-        status = "ENABLED" if enabled else "DISABLED"
-        print(f"[App] Platform {key} {status}")
-
-        if self._is_monitoring and self._monitor:
-            platforms = self._dashboard.get_enabled_platforms()
-            self._monitor.update_platforms(platforms)
-
-    @Slot()
     def _on_settings_changed(self):
         """Apply settings changes to the running monitor."""
         print("[App] Settings updated.")
-
-        if self._is_monitoring and self._monitor:
-            self._monitor.update_interval(self._settings.check_interval)
-            self._monitor.update_notifications(
-                notifications=self._settings.notifications_enabled,
-            )
-
-    # ==========================================
-    # SYSTEM TRAY
-    # ==========================================
-
-    def _setup_tray(self):
-        """Create system tray icon with context menu."""
-        if not os.path.exists(APP_ICON):
-            return
-
-        self._tray = QSystemTrayIcon(QIcon(APP_ICON), self)
-        self._tray.setToolTip("Freelance Tracker PRO")
-
-        tray_menu = QMenu()
-        tray_menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {Colors.BG_SECONDARY};
-                border: 1px solid {Colors.BORDER_DEFAULT};
-                border-radius: 8px; padding: 4px;
-            }}
-            QMenu::item {{
-                padding: 8px 24px; border-radius: 4px;
-                color: {Colors.TEXT_PRIMARY};
-            }}
-            QMenu::item:selected {{
-                background-color: {Colors.BG_HOVER};
-            }}
-        """)
-
-        show_action = QAction("Show Window", self)
-        show_action.triggered.connect(self._tray_show)
-
-        quit_action = QAction("Quit", self)
-        quit_action.triggered.connect(self._tray_quit)
-
-        tray_menu.addAction(show_action)
-        tray_menu.addSeparator()
-        tray_menu.addAction(quit_action)
-
-        self._tray.setContextMenu(tray_menu)
-        self._tray.activated.connect(self._on_tray_activated)
-        self._tray.show()
-
-    def _tray_show(self):
-        self.showNormal()
-        self.activateWindow()
-        self.raise_()
-
-    def _tray_quit(self):
-        self._shutdown()
-        QApplication.quit()
-
-    def _on_tray_activated(self, reason):
-        if reason == QSystemTrayIcon.DoubleClick:
-            self._tray_show()
+        
+        if self.is_monitoring and self.monitor:
+            platforms = self.dashboard.get_enabled_platforms()
+            self.monitor.update_platforms(platforms)
+            self.monitor.update_interval(self.settings.check_interval)
+            self.monitor.update_notifications(notifications=self.settings.notifications_enabled)
 
     # ==========================================
     # APPLICATION LIFECYCLE
     # ==========================================
 
-    def _shutdown(self):
-        """Clean shutdown: stop monitor, save settings, hide tray."""
+    def _on_closing(self):
+        """Handle window close."""
+        self.withdraw()  # Hide window to system tray
+        
+    def quit_app(self):
+        """Clean shutdown: stop monitor, save settings, exit."""
         print("[App] Shutting down...")
+        self.withdraw()
 
         # Stop monitoring thread
-        if self._is_monitoring and self._monitor:
-            self._monitor.stop()
-            if not self._monitor.wait(3000):
-                print("[App] Warning: Monitor thread did not stop within 3s.")
-                self._monitor.terminate()
-                self._monitor.wait(1000)
-
-        # Hide tray icon
-        if self._tray:
-            self._tray.hide()
+        if self.is_monitoring and self.monitor:
+            self.monitor.stop()
+            self.monitor.join(timeout=3.0)
 
         # Save settings on exit
-        self._settings.save()
+        self.settings.save()
         print("[App] Settings saved. Goodbye!")
-
-    def closeEvent(self, event):
-        """Handle window close — shutdown gracefully."""
-        self._shutdown()
-        event.accept()
+        self.quit()

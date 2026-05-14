@@ -11,7 +11,15 @@ echo ========================================
 echo.
 
 REM --- Check Python ---
-python --version >nul 2>&1
+if exist "venv\Scripts\python.exe" (
+    set PYTHON_CMD=venv\Scripts\python.exe
+    set PIP_CMD=venv\Scripts\pip.exe
+) else (
+    set PYTHON_CMD=python
+    set PIP_CMD=pip
+)
+
+%PYTHON_CMD% --version >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Python is not installed or not in PATH.
     pause
@@ -19,10 +27,10 @@ if errorlevel 1 (
 )
 
 REM --- Check PyInstaller ---
-python -m PyInstaller --version >nul 2>&1
+%PYTHON_CMD% -m PyInstaller --version >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Installing PyInstaller...
-    pip install pyinstaller
+    %PIP_CMD% install pyinstaller
 )
 
 REM --- Clean old build ---
@@ -33,19 +41,21 @@ if exist "*.spec" del /q "*.spec"
 
 REM --- Install dependencies ---
 echo [2/4] Installing dependencies...
-pip install -r requirements.txt
+%PIP_CMD% install -r requirements.txt
 
 REM --- Build executable ---
 echo [3/4] Building executable...
-python -m PyInstaller ^
+%PYTHON_CMD% -m PyInstaller ^
     --noconfirm ^
-    --onedir ^
+    --onefile ^
     --windowed ^
     --name "Freelance Tracker" ^
     --icon "icons\FWT.ico" ^
     --add-data "icons;icons" ^
     --collect-all "customtkinter" ^
     --collect-all "pystray" ^
+    --hidden-import "customtkinter" ^
+    --hidden-import "darkdetect" ^
     --hidden-import "win11toast" ^
     --hidden-import "requests" ^
     --hidden-import "bs4" ^

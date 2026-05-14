@@ -60,6 +60,12 @@ htmlcov/
 *.whl
 *.tar.gz
 
+
+# Inno Setup
+output/
+*.iss
+
+
 # ----- Playwright -----
 # Browser binaries are installed per-machine
 # and should not be committed

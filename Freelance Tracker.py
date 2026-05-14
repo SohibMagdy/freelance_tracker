@@ -7,11 +7,13 @@ sets up crash logging, system tray, and starts the GUI event loop.
 
 import sys
 import os
+print("[Startup] Python initialized", flush=True)
 import ctypes
 import traceback
 import threading
 from datetime import datetime
 import customtkinter as ctk
+print("[Startup] Imports completed", flush=True)
 
 # ==========================================
 # UTF-8 CONSOLE SAFETY (Windows EXE builds)
@@ -21,6 +23,7 @@ try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    print("[Startup] Stdout/Stderr reconfigured", flush=True)
 except Exception:
     import io
     if sys.stdout is None:
@@ -34,6 +37,7 @@ except Exception:
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+print("[Startup] sys.path configured", flush=True)
 
 # ==========================================
 # GLOBAL CRASH LOGGING
@@ -100,6 +104,7 @@ def run_system_tray(app_window):
         else:
             # Fallback 16x16 black image
             image = Image.new('RGB', (16, 16), color=(0, 0, 0))
+        print("[Startup] Icons loaded")
 
         def show_window(icon, item):
             app_window.after(0, app_window.deiconify)
@@ -114,6 +119,7 @@ def run_system_tray(app_window):
         )
 
         icon = pystray.Icon("Freelance Tracker PRO", image, "Freelance Tracker PRO", menu)
+        print("[Startup] Tray initialized")
         icon.run()
     except ImportError:
         print("[SystemTray] pystray or Pillow not installed. Tray disabled.")
@@ -126,28 +132,32 @@ def main():
     setup_crash_logging()
 
     mutex_handle = _acquire_single_instance_mutex()
+    print("[Startup] Mutex acquired", flush=True)
     if mutex_handle is None:
-        print("[SingleInstance] [BLOCKED] Duplicate launch detected. Exiting immediately.")
+        print("[SingleInstance] [BLOCKED] Duplicate launch detected. Exiting immediately.", flush=True)
         sys.exit(0)
 
-    print("=" * 55)
-    print("  FREELANCE TRACKER PRO (CustomTkinter) - Starting...")
-    print("=" * 55)
+    print("=" * 55, flush=True)
+    print("  FREELANCE TRACKER PRO (CustomTkinter) - Starting...", flush=True)
+    print("=" * 55, flush=True)
 
     # Setup CustomTkinter Global Appearance
     ctk.set_appearance_mode("Dark")
     ctk.set_default_color_theme("blue")
+    print("[Startup] CustomTkinter initialized", flush=True)
 
     # Load settings
     from src.utils.settings_manager import SettingsManager
     from src.utils.resources import SETTINGS_FILE
     settings = SettingsManager(SETTINGS_FILE)
     print(f"[App] Settings loaded - interval={settings.check_interval}s, "
-          f"notifications={'ON' if settings.notifications_enabled else 'OFF'}")
+          f"notifications={'ON' if settings.notifications_enabled else 'OFF'}", flush=True)
 
     # Create main window
     from src.ui.main_window import MainWindow
+    print("[Startup] MainWindow class imported", flush=True)
     window = MainWindow(settings)
+    print("[Startup] MainWindow created", flush=True)
     
     # Start System Tray in background
     tray_thread = threading.Thread(target=run_system_tray, args=(window,), daemon=True)
@@ -162,6 +172,7 @@ def main():
         print("[App] Main window displayed.")
 
     # Start mainloop (blocks until app exits)
+    print("[Startup] Entering mainloop", flush=True)
     window.mainloop()
 
     # Cleanup

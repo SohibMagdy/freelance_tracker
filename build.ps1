@@ -10,8 +10,15 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # --- Check Python ---
+$pythonCmd = "python"
+$pipCmd = "pip"
+if (Test-Path "venv\Scripts\python.exe") {
+    $pythonCmd = "venv\Scripts\python.exe"
+    $pipCmd = "venv\Scripts\pip.exe"
+}
+
 try {
-    $pythonVersion = python --version 2>&1
+    $pythonVersion = & $pythonCmd --version 2>&1
     Write-Host "[OK] $pythonVersion" -ForegroundColor Green
 } catch {
     Write-Host "[ERROR] Python is not installed or not in PATH." -ForegroundColor Red
@@ -19,10 +26,10 @@ try {
 }
 
 # --- Check/Install PyInstaller ---
-$pyinstallerCheck = python -m PyInstaller --version 2>&1
+$pyinstallerCheck = & $pythonCmd -m PyInstaller --version 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[INFO] Installing PyInstaller..." -ForegroundColor Yellow
-    pip install pyinstaller
+    & $pipCmd install pyinstaller
 }
 
 # --- Clean old build artifacts ---
@@ -33,7 +40,7 @@ Get-ChildItem -Filter "*.spec" | Remove-Item -Force -ErrorAction SilentlyContinu
 
 # --- Install dependencies ---
 Write-Host "[2/4] Installing dependencies..." -ForegroundColor Yellow
-pip install -r requirements.txt
+& $pipCmd install -r requirements.txt
 
 # --- Build executable ---
 Write-Host "[3/4] Building executable..." -ForegroundColor Yellow
@@ -45,12 +52,17 @@ $pyinstallerArgs = @(
     '--name', 'Freelance Tracker'
     '--icon', 'icons\FWT.ico'
     '--add-data', 'icons;icons'
+    '--collect-all', 'customtkinter'
+    '--collect-all', 'pystray'
+    '--hidden-import', 'customtkinter'
+    '--hidden-import', 'darkdetect'
     '--hidden-import', 'PySide6.QtWidgets'
     '--hidden-import', 'PySide6.QtCore'
     '--hidden-import', 'PySide6.QtGui'
     '--hidden-import', 'win11toast'
     '--hidden-import', 'requests'
     '--hidden-import', 'bs4'
+    '--hidden-import', 'PIL'
     '--hidden-import', 'src.core.monitor'
     '--hidden-import', 'src.core.notifier'
     '--hidden-import', 'src.core.scrapers.base'
@@ -73,7 +85,7 @@ $pyinstallerArgs = @(
     'Freelance Tracker.py'
 )
 
-python -m PyInstaller @pyinstallerArgs
+& $pythonCmd -m PyInstaller @pyinstallerArgs
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""

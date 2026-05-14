@@ -11,11 +11,15 @@ Architecture:
     toast processes run simultaneously.
 """
 
-import subprocess
 import sys
 import os
 import threading
 import queue
+import traceback
+try:
+    from win11toast import toast
+except ImportError:
+    toast = None
 
 from src.utils.resources import (
     APP_ICON, MOSTAQL_ICON, NAFEZLY_ICON,
@@ -39,7 +43,7 @@ PLATFORM_ICONS = {
 class Notifier:
     """
     Handles Windows toast notifications for new freelance projects.
-    Uses a Queue to manage dispatching subprocesses.
+    Uses a Queue to manage dispatching toast notifications natively.
     """
 
     def __init__(self, notifications_enabled: bool = True):
@@ -72,7 +76,7 @@ class Notifier:
             print(f"[Notifier] [WARN] Notification queue is full. Dropping: {title[:30]}")
 
     def _worker_loop(self):
-        """Background thread that consumes the queue and launches subprocesses."""
+        """Background thread that consumes the queue and displays native toast notifications."""
         while True:
             try:
                 site, title, link, icon_path = self._queue.get()
@@ -82,7 +86,7 @@ class Notifier:
                 
                 # Launch the notification in a way that will release the semaphore when done
                 threading.Thread(
-                    target=self._launch_subprocess_and_wait,
+                    target=self._display_toast,
                     args=(site, title, link, icon_path),
                     daemon=True
                 ).start()
@@ -90,72 +94,35 @@ class Notifier:
             except Exception as e:
                 print(f"[Notifier] Worker loop error: {e}")
 
-    def _launch_subprocess_and_wait(self, site: str, title: str, link: str, icon_path: str):
-        """Launch the subprocess and wait for it to exit, then release semaphore."""
+    def _display_toast(self, site: str, title: str, link: str, icon_path: str):
+        """Display the native toast notification and wait for user interaction, then release semaphore."""
         try:
-            self._send_blocking(site, title, link, icon_path)
+            print(f"[Notifier] [INFO] Toast requested for: {title[:50]}...")
+            if toast is None:
+                print("[Notifier] [ERROR] win11toast is not installed. Cannot display notification.")
+                return
+
+            safe_title = title.replace("\\n", " ")[:150]
+            safe_site  = site
+            safe_link  = link
+
+            kwargs = {
+                "title": f"{safe_site} - New Project",
+                "body": safe_title,
+                "on_click": safe_link,  # Native URL handling
+                "duration": "short",
+                "audio": {"src": "ms-winsoundevent:Notification.Default", "silent": "false"}
+            }
+
+            if icon_path and os.path.exists(icon_path):
+                kwargs["icon"] = icon_path
+
+            # This call blocks until the toast is dismissed or clicked
+            result = toast(**kwargs)
+            print(f"[Notifier] [SUCCESS] Toast displayed successfully. Result: {result}")
+
+        except Exception as e:
+            print(f"[Notifier] [ERROR] Toast execution failed: {e}")
+            traceback.print_exc()
         finally:
             self._semaphore.release()
-
-    def _send_blocking(self, site: str, title: str, link: str, icon_path: str = None) -> None:
-        """
-        Spawn a subprocess that posts the toast and waits for user interaction.
-        """
-        safe_title = title.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")[:150]
-        safe_site  = site.replace("\\", "\\\\").replace('"', '\\"')
-        safe_link  = link.replace("\\", "\\\\").replace('"', '\\"')
-
-        icon_arg = ""
-        if icon_path:
-            safe_icon = icon_path.replace("\\", "\\\\")
-            icon_arg = f', icon=r"{safe_icon}"'
-
-        script = f'''
-import sys
-import webbrowser
-
-try:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-URL = "{safe_link}"
-TITLE = "{safe_site} - New Project"
-BODY  = "{safe_title}"
-
-def on_click(args):
-    try:
-        webbrowser.open(URL)
-    except Exception:
-        pass
-    return args
-
-try:
-    from win11toast import toast
-    result = toast(
-        TITLE,
-        BODY,
-        on_click=on_click,
-        duration="short",
-        audio={{"silent": "false"}}{icon_arg}
-    )
-except Exception:
-    pass
-'''
-
-        try:
-            # We use Popen and wait() to block the thread until the subprocess finishes (toast dismissed/clicked)
-            proc = subprocess.Popen(
-                [sys.executable, "-c", script],
-                creationflags=subprocess.CREATE_NO_WINDOW,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            # Wait up to 30 seconds for the toast to naturally disappear or be clicked
-            try:
-                proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-        except Exception as e:
-            print(f"[Notifier] [ERROR] Subprocess failed: {e}")
